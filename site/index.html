@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Irfan | Cloud Portfolio</title>
+  <style>
+    :root {
+      --bg: #f7f9fb;
+      --surface: #ffffff;
+      --text: #14212b;
+      --muted: #55646f;
+      --accent: #0b6e8a;
+      --line: #d9e1e7;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f1a22;
+        --surface: #16242e;
+        --text: #e6edf2;
+        --muted: #9fb0bc;
+        --accent: #4cc3df;
+        --line: #263845;
+      }
+    }
+    * { box-sizing: border-box; }
+    html { font-size: 17px; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Georgia, "Times New Roman", serif;
+      line-height: 1.65;
+    }
+    main { max-width: 44rem; margin: 0 auto; padding: 4rem 1.25rem 3rem; }
+    h1 { font-size: 2.6rem; line-height: 1.15; margin: 0 0 .4rem; letter-spacing: -0.01em; }
+    h2 { font-size: 1.2rem; margin: 0 0 .6rem; font-family: system-ui, Arial, sans-serif; color: var(--accent); }
+    .tagline { margin: 0; font-size: 1.15rem; color: var(--muted); }
+    section { margin-top: 2.5rem; padding-top: 1.5rem; border-top: 1px solid var(--line); }
+    ul { padding-left: 1.2rem; margin: 0; }
+    li { margin-bottom: .35rem; }
+    a { color: var(--accent); }
+    footer {
+      margin-top: 3rem; padding-top: 1.25rem; border-top: 1px solid var(--line);
+      color: var(--muted); font-family: system-ui, Arial, sans-serif; font-size: .9rem;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Irfan</h1>
+      <p class="tagline">Cyber Security Engineer, Aspiring cloud engineer, building and documenting on AWS.</p>
+    </header>
+
+    <section>
+      <h2>About me</h2>
+      <p>Cybersecurity professional with 3.5+ years of experience across WAF administration, SOC operations, and AWS cloud in
+banking and enterprise environments. Hands-on with Imperva and Akamai WAF, OWASP Top 10 mitigation, and false-positive
+reduction, alongside Splunk-based alert triage, log analysis, and incident response. Working knowledge of core AWS services
+including VPC, EC2, S3, IAM, Lambda, and CloudFront. Holds an M.Tech in Cyber Forensics and Information Security.</p>
+    </section>
+
+    <section>
+      <h2>Skills</h2>
+      <ul>
+        <li>AWS: S3, CloudFront, Lambda, API Gateway, DynamoDB, IAM</li>
+        <li>Linux and networking fundamentals</li>
+        <li>SOC,Splunk,WAF, Imperva, Akamai, VAPT, BurpSuite, OWASP Zap</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Projects</h2>
+      <p><strong>This website.</strong> A static site hosted privately in S3 and delivered over HTTPS through CloudFront, with a serverless visitor counter built on API Gateway, Lambda, and DynamoDB.</p>
+      <p>Add a link to your GitHub repository and write-up here: <a href="#">project documentation</a>.</p>
+    </section>
+
+    <section>
+      <h2>Contact</h2>
+      <a href="https://www.linkedin.com/in/irfan-k-8139a5192">LinkedIn</a>
+    </section>
+
+    <footer>Visitors: <span id="visitor-count">loading…</span></footer>
+  </main>
+
+  <script>
+  fetch("https://47shfsv4xh.execute-api.ap-south-1.amazonaws.com/count")
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      document.getElementById("visitor-count").textContent = data.count;
+    })
+    .catch(function () {
+      document.getElementById("visitor-count").textContent = "unavailable";
+    });
+</script>
+</body>
+</html>
