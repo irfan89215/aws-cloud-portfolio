@@ -12,7 +12,7 @@ A personal portfolio website hosted on AWS, with a serverless visitor counter. I
 - A serverless backend (API Gateway, Lambda, DynamoDB) with an atomic counter
 - Least-privilege IAM, MFA, and restricted CORS
 - API protection with throttling, and monitoring with CloudWatch alarms and SNS email
-- Web security headers (HSTS, CSP, frame and content-type protection) verified with a scanner
+- Web security headers (HSTS, a strict CSP without `'unsafe-inline'`, frame and content-type protection), verified with a scanner (A+)
 - Cost awareness: pricing the options (such as WAF) before enabling them
 - Documentation of decisions, mistakes, and known limitations
 
@@ -190,10 +190,10 @@ A custom CloudFront response headers policy, `portfolio-security-headers`, is at
 | Content-Security-Policy | see below | Injected or third-party content |
 | Permissions-Policy | `geolocation=(), camera=(), microphone=()` | Unused browser features |
 
-The Content-Security-Policy allows only what the page needs: its own inline style and script, and one connection to the API address.
+The Content-Security-Policy allows only what the page needs: its own files and one connection to the API address. The inline CSS and JavaScript were moved out of `index.html` into `style.css` and `script.js`, so the policy needs no `'unsafe-inline'`.
 
 ```
-default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://47shfsv4xh.execute-api.ap-south-1.amazonaws.com; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src https://47shfsv4xh.execute-api.ap-south-1.amazonaws.com; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
 ```
 
 Response headers before the policy:
@@ -204,9 +204,17 @@ Response headers after:
 
 ![Headers after](docs/screenshots/18b-headers-after.jpg)
 
-A scan with securityheaders.com gives grade A with all six headers detected. The grade is capped at A because the policy needs `'unsafe-inline'` for scripts, since the page has an inline script. The next step would be moving the script and styles into separate files and tightening the policy.
+My first scan with securityheaders.com gave grade A with all six headers detected, capped at A because the first version of the policy needed `'unsafe-inline'` for the page's inline script and styles.
 
-![Security headers scan](docs/screenshots/18c-securityheaders-scan.jpg)
+![Security headers scan before tightening the policy (grade A)](docs/screenshots/18c-securityheaders-scan.jpg)
+
+I then moved the inline code into separate files and removed `'unsafe-inline'` from the policy. Requesting the site directly from CloudShell confirms CloudFront is serving the tightened policy:
+
+![Tightened Content-Security-Policy served by CloudFront](docs/screenshots/18e-csp-tightened.jpg)
+
+The same scan now gives **A+**.
+
+![Security headers scan after tightening the policy (grade A+)](docs/screenshots/18d-securityheaders-scan-after.jpg)
 
 ## Security decisions
 
@@ -216,14 +224,14 @@ A scan with securityheaders.com gives grade A with all six headers detected. The
 - **CORS** is restricted to the CloudFront domain instead of `*`.
 - **HTTPS** is enforced by CloudFront.
 - **API throttling:** the stage allows 5 requests per second with a burst of 10, so direct calls cannot flood Lambda and DynamoDB.
-- **Security headers:** HSTS, `nosniff`, frame protection, a referrer policy, a Content-Security-Policy, and a Permissions-Policy are added by CloudFront (grade A on securityheaders.com).
+- **Security headers:** HSTS, `nosniff`, frame protection, a referrer policy, a strict Content-Security-Policy, and a Permissions-Policy are added by CloudFront (grade A+ on securityheaders.com).
 - **Alerting:** CloudWatch alarms email me about Lambda errors, throttling, and API server errors.
 - **WAF was considered and not enabled.** The console estimated about $14/month for 10M requests. For a static, low-traffic site with a private bucket, that cost was not justified. I would revisit it if the site gained dynamic features.
 
 ### Known limitations
 
 - The API is public by design, since a visitor counter needs no login. CORS only controls what browsers allow, so anyone can still call the endpoint directly and inflate the count. Throttling (5 requests per second, burst 10) limits the speed and the impact, but it does not stop a slow, steady caller. Best-effort limits are targets, not guarantees. CloudWatch alarms tell me about errors and throttling, but they do not block anything.
-- The Content-Security-Policy allows `'unsafe-inline'` for scripts, because the page has an inline script. This weakens protection against injected scripts. The risk is small on a static site with no user input, but removing it is on the roadmap.
+- The browser's automatic request for `favicon.ico` returns 403, because the bucket is private and no icon exists. It is harmless.
 - The alarms cover availability and abuse of the counter. They would not detect a compromised account or someone reading the static pages. That would need CloudTrail, log analysis, or a threat detection service.
 - The counter increments on every page load, including repeat visits and my own. It counts page views, not unique visitors.
 - Opening a path that does not exist as a file, such as `/count` on the CloudFront domain, returns `AccessDenied`, because the bucket is private and only `index.html` exists.
@@ -248,12 +256,14 @@ A scan with securityheaders.com gives grade A with all six headers detected. The
 | `503` responses during the burst test | The default Lambda concurrency limit of 10 on a new account | Confirmed with the Lambda `Throttles` metric and documented it as a second layer of protection |
 | New alarm showed "Insufficient data" | A quiet site sends no datapoints | Set missing data to be treated as not breaching, and the alarm moved to OK |
 | Security scanner flagged the Permissions-Policy header as invalid | A stray word in the header value | Corrected the value and scanned again |
+| Page lost its styling after moving the CSS and script into files | `style.css` and `script.js` were not in the same folder as `index.html` | Moved them into the `site` folder next to `index.html` |
+| Browser console showed a blocked font and an extra stylesheet | A browser extension injected them, and the CSP blocked them | Tested in a private window, where the messages were gone |
 | Runtime list for Lambda included a Preview version | Preview runtimes are early releases, not meant for lasting workloads | Chose Python 3.14 from the "Latest supported" list |
 
 ## Repository structure
 
 ```
-site/            Static website (index.html)
+site/            Static website (index.html, style.css, script.js)
 lambda/          Lambda function source
 iam/             Least-privilege IAM policy for the function
 docs/            Notes and screenshots
@@ -274,7 +284,7 @@ docs/            Notes and screenshots
 - [x] Security headers via a CloudFront response headers policy
 - [x] API throttling on the `$default` stage
 - [x] CloudWatch alarms with email notification (errors, throttles, API 5xx)
-- [ ] Tighten the Content-Security-Policy: move the inline script and styles into files and remove `'unsafe-inline'`
+- [x] Tighten the Content-Security-Policy: inline script and styles moved into files, `'unsafe-inline'` removed (A+)
 - [ ] Count unique visitors instead of page views
 
 ## Author
