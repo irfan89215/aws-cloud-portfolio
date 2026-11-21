@@ -4,47 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Irfan | Cloud Portfolio</title>
-  <style>
-    :root {
-      --bg: #f7f9fb;
-      --surface: #ffffff;
-      --text: #14212b;
-      --muted: #55646f;
-      --accent: #0b6e8a;
-      --line: #d9e1e7;
-    }
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --bg: #0f1a22;
-        --surface: #16242e;
-        --text: #e6edf2;
-        --muted: #9fb0bc;
-        --accent: #4cc3df;
-        --line: #263845;
-      }
-    }
-    * { box-sizing: border-box; }
-    html { font-size: 17px; }
-    body {
-      margin: 0;
-      background: var(--bg);
-      color: var(--text);
-      font-family: Georgia, "Times New Roman", serif;
-      line-height: 1.65;
-    }
-    main { max-width: 44rem; margin: 0 auto; padding: 4rem 1.25rem 3rem; }
-    h1 { font-size: 2.6rem; line-height: 1.15; margin: 0 0 .4rem; letter-spacing: -0.01em; }
-    h2 { font-size: 1.2rem; margin: 0 0 .6rem; font-family: system-ui, Arial, sans-serif; color: var(--accent); }
-    .tagline { margin: 0; font-size: 1.15rem; color: var(--muted); }
-    section { margin-top: 2.5rem; padding-top: 1.5rem; border-top: 1px solid var(--line); }
-    ul { padding-left: 1.2rem; margin: 0; }
-    li { margin-bottom: .35rem; }
-    a { color: var(--accent); }
-    footer {
-      margin-top: 3rem; padding-top: 1.25rem; border-top: 1px solid var(--line);
-      color: var(--muted); font-family: system-ui, Arial, sans-serif; font-size: .9rem;
-    }
-  </style>
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <main>
@@ -73,7 +33,7 @@ including VPC, EC2, S3, IAM, Lambda, and CloudFront. Holds an M.Tech in Cyber Fo
     <section>
       <h2>Projects</h2>
       <p><strong>This website.</strong> A static site hosted privately in S3 and delivered over HTTPS through CloudFront, with a serverless visitor counter built on API Gateway, Lambda, and DynamoDB.</p>
-      <p>Add a link to your GitHub repository and write-up here: <a href="#">project documentation</a>.</p>
+      <p>Source code and write-up: <a href="https://github.com/irfan89215/aws-cloud-portfolio">github.com/irfan89215/aws-cloud-portfolio</a></p>
     </section>
 
     <section>
@@ -84,15 +44,6 @@ including VPC, EC2, S3, IAM, Lambda, and CloudFront. Holds an M.Tech in Cyber Fo
     <footer>Visitors: <span id="visitor-count">loading…</span></footer>
   </main>
 
-  <script>
-  fetch("https://47shfsv4xh.execute-api.ap-south-1.amazonaws.com/count")
-    .then(function (r) { return r.json(); })
-    .then(function (data) {
-      document.getElementById("visitor-count").textContent = data.count;
-    })
-    .catch(function () {
-      document.getElementById("visitor-count").textContent = "unavailable";
-    });
-</script>
+ <script src="script.js"></script>
 </body>
 </html>
