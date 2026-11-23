@@ -1,0 +1,51 @@
+name: Test and deploy
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "README.md"
+      - "docs/**"
+  workflow_dispatch:
+
+# The id-token permission lets the job request a short-lived OIDC token.
+# No AWS access keys are stored in GitHub.
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ap-south-1
+  S3_BUCKET: irfan-portfolio-site-mumbai-2026
+  CLOUDFRONT_DISTRIBUTION_ID: E9UPKBP1DJTAL
+
+jobs:
+  test:
+    name: Run unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install test dependencies
+        run: pip install pytest boto3
+      - name: Run tests
+        run: pytest lambda -v
+
+  deploy:
+    name: Deploy site to S3 and clear the CloudFront cache
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Get short-lived AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-session-name: github-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Upload site files to S3
+        run: aws s3 sync site/ "s3://${S3_BUCKET}" --delete
+      - name: Clear the CloudFront cache
+        run: aws cloudfront create-invalidation --distribution-id "${CLOUDFRONT_DISTRIBUTION_ID}" --paths "/*"
