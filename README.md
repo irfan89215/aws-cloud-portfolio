@@ -13,6 +13,7 @@ A personal portfolio website hosted on AWS, with a serverless visitor counter. I
 - Least-privilege IAM, MFA, and restricted CORS
 - API protection with throttling, and monitoring with CloudWatch alarms and SNS email
 - Web security headers (HSTS, a strict CSP without `'unsafe-inline'`, frame and content-type protection), verified with a scanner (A+)
+- CI/CD with GitHub Actions: unit tests first, then an S3 upload and a CloudFront cache clear, signing in to AWS with OIDC and no stored access keys
 - Cost awareness: pricing the options (such as WAF) before enabling them
 - Documentation of decisions, mistakes, and known limitations
 
@@ -31,6 +32,9 @@ API Gateway (HTTP API) ---> Lambda (Python) ---> DynamoDB (on-demand)
 
 Monitoring:
 CloudWatch alarms (Lambda errors, Lambda throttles, API Gateway 5xx) ---> SNS topic ---> email
+
+Deployment:
+git push to main ---> GitHub Actions: unit tests ---> OIDC role (short-lived credentials) ---> S3 sync + CloudFront cache clear
 ```
 
 **How a request flows**
@@ -49,9 +53,10 @@ CloudWatch alarms (Lambda errors, Lambda throttles, API Gateway 5xx) ---> SNS to
 | API Gateway (HTTP API) | Public endpoint `GET /count`, with CORS limited to the site domain. |
 | Lambda (Python) | Increments and returns the visitor count. |
 | DynamoDB (on-demand) | Stores the count. No capacity planning, and negligible cost at this scale. |
-| IAM | Least-privilege role for the function, MFA on root and on an admin user. |
+| IAM | Least-privilege roles for the function and for the deploy pipeline, an OIDC identity provider for GitHub, and MFA on root and on an admin user. |
 | CloudWatch | Alarms on Lambda errors, Lambda throttles, and API Gateway 5xx responses. |
 | SNS | Sends the alarm notifications to my email. |
+| GitHub Actions | Runs the unit tests and deploys the site on every push to `main`. |
 
 ## Build walkthrough
 
@@ -216,6 +221,42 @@ The same scan now gives **A+**.
 
 ![Security headers scan after tightening the policy (grade A+)](docs/screenshots/18d-securityheaders-scan-after.jpg)
 
+### 7. Automated deployment with GitHub Actions
+
+Every push to `main` runs the workflow in `.github/workflows/deploy.yml`. Changes to `README.md` and `docs/` are ignored, and the workflow can also be started by hand.
+
+1. **Run unit tests.** Four tests in `lambda/test_lambda_function.py` check the counter function. boto3 is patched, so the tests need no AWS account or network. They check that the function returns `200` and the new count, that it uses one atomic `ADD` on the `site` item of the `visitor-counter` table, and that a database error is not swallowed, so the Lambda `Errors` alarm would still fire.
+2. **Deploy**, only if the tests pass. The job gets short-lived AWS credentials, runs `aws s3 sync site/ ... --delete`, and then clears the CloudFront cache with an invalidation for `/*`.
+
+**No AWS keys are stored in GitHub.** The job asks GitHub for an OIDC token, and AWS exchanges it for temporary credentials for one IAM role.
+
+- GitHub is registered in IAM as an OpenID Connect identity provider, with `sts.amazonaws.com` as the audience.
+
+![OIDC identity provider in IAM](docs/screenshots/19a-oidc-provider.jpg)
+
+- The role's trust policy accepts only tokens for this repository and the `main` branch. Other repositories, other branches, and other audiences are refused.
+
+![Role trust policy](docs/screenshots/19b-role-trust-policy.jpg)
+
+- The role's permissions allow only what the deploy needs: `s3:PutObject` and `s3:DeleteObject` on the bucket's objects, `s3:ListBucket` on the bucket, and `cloudfront:CreateInvalidation` on this one distribution. It cannot touch Lambda, DynamoDB, or IAM. Policy templates are in `iam/`, with the account ID replaced by a placeholder.
+- The role's ARN contains the account ID, so it is stored as a GitHub Actions secret (`AWS_ROLE_ARN`) instead of in the workflow file. It is an address, not a credential.
+
+The run history shows a failed first attempt followed by green runs. The failure and its fix are described below.
+
+![Workflow run history](docs/screenshots/19c-actions-run-history.jpg)
+
+The deploy job uploads the site files and then clears the cache.
+
+![S3 sync step](docs/screenshots/19d-deploy-s3-sync.jpg)
+
+![CloudFront cache clear step](docs/screenshots/19e-deploy-cache-invalidation.jpg)
+
+To test the pipeline end to end, I edited a sentence in `site/index.html` on GitHub. The workflow ran by itself, and the change was live on the site a minute later without opening the S3 or CloudFront consoles.
+
+![Change published by the pipeline](docs/screenshots/19f-pipeline-change-live.jpg)
+
+**Troubleshooting the sign-in.** The first run failed at the AWS sign-in step with `Not authorized to perform sts:AssumeRoleWithWebIdentity`, and every retry failed the same way. The trust policy looked correct, and entering the role ARN secret again did not help. I added a temporary workflow step that printed the claims in the OIDC token (not the token itself). It showed that the `sub` claim for this repository includes numeric owner and repository IDs, in the form `repo:<owner>@<owner-id>/<repo>@<repo-id>:ref:refs/heads/main`, while my trust policy expected the plain form. I updated the condition to match, the next run succeeded, and I removed the debug step.
+
 ## Security decisions
 
 - **MFA** on the root user and on the IAM user. The root user is not used for building.
@@ -226,11 +267,15 @@ The same scan now gives **A+**.
 - **API throttling:** the stage allows 5 requests per second with a burst of 10, so direct calls cannot flood Lambda and DynamoDB.
 - **Security headers:** HSTS, `nosniff`, frame protection, a referrer policy, a strict Content-Security-Policy, and a Permissions-Policy are added by CloudFront (grade A+ on securityheaders.com).
 - **Alerting:** CloudWatch alarms email me about Lambda errors, throttling, and API server errors.
+- **Keyless deployment:** GitHub Actions signs in with OIDC and short-lived credentials, so there are no AWS access keys in GitHub. The deploy role trusts only this repository's `main` branch and can only upload to the site bucket and clear the cache for this one distribution.
 - **WAF was considered and not enabled.** The console estimated about $14/month for 10M requests. For a static, low-traffic site with a private bucket, that cost was not justified. I would revisit it if the site gained dynamic features.
 
 ### Known limitations
 
 - The API is public by design, since a visitor counter needs no login. CORS only controls what browsers allow, so anyone can still call the endpoint directly and inflate the count. Throttling (5 requests per second, burst 10) limits the speed and the impact, but it does not stop a slow, steady caller. Best-effort limits are targets, not guarantees. CloudWatch alarms tell me about errors and throttling, but they do not block anything.
+- The pipeline deploys only the site files. The Lambda function, API Gateway, CloudFront, and the alarms were configured in the console, so they are not reproducible from the repository yet. Infrastructure as code is on the roadmap.
+- `aws s3 sync --delete` removes anything in the bucket that is not in `site/`. The sync also re-uploads every file on each run, because a fresh checkout changes file timestamps. That is harmless at this size.
+- The workflow actions are pinned to major version tags, not to full commit hashes. Anyone who can push to `main` can deploy, which at the moment is only me. The unit tests use a mocked DynamoDB, so they do not test against real AWS.
 - The browser's automatic request for `favicon.ico` returns 403, because the bucket is private and no icon exists. It is harmless.
 - The alarms cover availability and abuse of the counter. They would not detect a compromised account or someone reading the static pages. That would need CloudTrail, log analysis, or a threat detection service.
 - The counter increments on every page load, including repeat visits and my own. It counts page views, not unique visitors.
@@ -242,6 +287,7 @@ The same scan now gives **A+**.
 - CloudFront on pay-as-you-go ($0/month base) with the North America and Europe price class to limit cost.
 - S3, Lambda, API Gateway, and DynamoDB usage is tiny for a portfolio site.
 - The three CloudWatch alarms and the SNS email notifications fit within the free allowances (10 alarm metrics and 1,000 email notifications per month). AWS does not charge extra for CloudFront response headers policies.
+- GitHub Actions is free for public repositories on standard runners at the time of writing. The cache clear is one invalidation path per run, which is within the monthly free allowance of AWS at the time of writing.
 - No custom domain, to avoid the yearly fee.
 
 ## Challenges and what I learned
@@ -258,15 +304,18 @@ The same scan now gives **A+**.
 | Security scanner flagged the Permissions-Policy header as invalid | A stray word in the header value | Corrected the value and scanned again |
 | Page lost its styling after moving the CSS and script into files | `style.css` and `script.js` were not in the same folder as `index.html` | Moved them into the `site` folder next to `index.html` |
 | Browser console showed a blocked font and an extra stylesheet | A browser extension injected them, and the CSP blocked them | Tested in a private window, where the messages were gone |
+| The first workflow run failed to assume the AWS role, on every retry | The OIDC token's `sub` claim includes numeric owner and repository IDs, and my trust policy expected the plain form | Printed the token's claims in a temporary step, updated the trust policy condition to match, and removed the debug step |
+| Each push started two workflow runs for a while | The workflow downloaded as `deploy (1).yml` because a file with that name already existed, so two workflow files were uploaded | Copied the content into `deploy.yml` and deleted the duplicate |
 | Runtime list for Lambda included a Preview version | Preview runtimes are early releases, not meant for lasting workloads | Chose Python 3.14 from the "Latest supported" list |
 
 ## Repository structure
 
 ```
-site/            Static website (index.html, style.css, script.js)
-lambda/          Lambda function source
-iam/             Least-privilege IAM policy for the function
-docs/            Notes and screenshots
+.github/workflows/   GitHub Actions workflow (tests, then deploy)
+site/                Static website (index.html, style.css, script.js)
+lambda/              Lambda function source and unit tests
+iam/                 IAM policy templates (Lambda role, GitHub deploy role)
+docs/                Notes and screenshots
 ```
 
 ## Notes on the screenshots
@@ -278,14 +327,16 @@ docs/            Notes and screenshots
 
 ## Roadmap
 
-- [ ] Deploy the site automatically with GitHub Actions (OIDC, no stored keys)
+- [x] Deploy the site automatically with GitHub Actions (OIDC, no stored keys)
 - [ ] Define the infrastructure in Terraform or AWS SAM
-- [ ] Add unit tests for the Lambda function
+- [x] Add unit tests for the Lambda function, run by the pipeline
 - [x] Security headers via a CloudFront response headers policy
 - [x] API throttling on the `$default` stage
 - [x] CloudWatch alarms with email notification (errors, throttles, API 5xx)
 - [x] Tighten the Content-Security-Policy: inline script and styles moved into files, `'unsafe-inline'` removed (A+)
+- [ ] Deploy the Lambda function from the pipeline as well
 - [ ] Count unique visitors instead of page views
+- [ ] Architecture diagram and a short blog post
 
 ## Author
 
